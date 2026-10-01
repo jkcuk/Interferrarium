@@ -263,6 +263,11 @@ input[type='file'] {
   padding: 3px 0;
 }
 
+.chain-list li.is-disabled > .component-row-header > span:first-child {
+  opacity: .55;
+  text-decoration: line-through;
+}
+
 .component-row-header {
   display: flex;
   align-items: center;
@@ -283,12 +288,52 @@ input[type='file'] {
   cursor: default;
 }
 
+.component-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.chain-list .visibility-toggle {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+  place-items: center;
+  color: var(--muted);
+  font-size: 0;
+  opacity: .72;
+}
+
+.chain-list .visibility-toggle:hover,
+.chain-list .visibility-toggle:focus-visible {
+  color: var(--teal);
+  opacity: 1;
+}
+
+.visibility-toggle svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
 .component-settings {
   display: grid;
   gap: 5px;
   margin: 5px 0 8px;
   padding: 6px 0 2px;
   border-top:0px solid var(--line);
+}
+
+.parameter-field {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
 }
 
 #simulation-settings.component-settings {
@@ -318,6 +363,14 @@ input[type='file'] {
 }
 
 .component-settings input[type='checkbox'] {
+  accent-color: var(--teal);
+}
+
+.component-settings .parameter-field input[type='range'] {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
   accent-color: var(--teal);
 }
 

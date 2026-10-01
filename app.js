@@ -271,10 +271,58 @@ function updateLabels() {
   document.querySelector('#environment-description').textContent = descriptions[controls.environment.value];
 }
 
+function createNumericControl(field, value, onChange) {
+  const control = document.createElement('div');
+  control.className = 'parameter-field';
+
+  const label = document.createElement('label');
+  label.textContent = field.label;
+
+  const numberInput = document.createElement('input');
+  numberInput.type = 'number';
+  numberInput.min = field.min;
+  numberInput.max = field.max;
+  numberInput.step = field.step;
+  numberInput.value = value;
+  label.append(numberInput);
+
+  const rangeInput = document.createElement('input');
+  rangeInput.type = 'range';
+  rangeInput.min = field.min;
+  rangeInput.max = field.max;
+  rangeInput.step = field.step;
+  rangeInput.value = value;
+  rangeInput.setAttribute('aria-label', `${field.label} slider`);
+
+  numberInput.addEventListener('input', () => {
+    rangeInput.value = numberInput.value;
+    onChange(Number(numberInput.value));
+  });
+  rangeInput.addEventListener('input', () => {
+    numberInput.value = rangeInput.value;
+    onChange(Number(rangeInput.value));
+  });
+
+  control.append(label, rangeInput);
+  return control;
+}
+
 function renderSimulationSettings() {
   const container = document.querySelector('#simulation-settings');
   container.replaceChildren();
   simulationFields.forEach(field => {
+    if (field.input === 'number') {
+      container.append(createNumericControl(
+        field,
+        simulationParameters[field.key],
+        value => {
+          simulationParameters[field.key] = value;
+          render();
+        }
+      ));
+      return;
+    }
+
     const fieldLabel = document.createElement('label');
     fieldLabel.textContent = field.label;
     const input = document.createElement(field.input === 'select' ? 'select' : 'input');
@@ -310,7 +358,8 @@ function getState() {
       controls.inspectionPoint?.value ?? 'source',
     chain: extraComponents.map(item => ({
       type: item.type,
-      params: { ...item.params }
+      params: { ...item.params },
+      enabled: item.enabled !== false
     }))
   };
 }
@@ -351,6 +400,7 @@ function applyState(state) {
     const restoredComponents = state.chain.map(savedItem => {
       const type = typeof savedItem === 'string' ? savedItem : savedItem.type;
       const item = makeSelectedComponent(type, typeof savedItem === 'string' ? {} : savedItem.params);
+      item.enabled = typeof savedItem === 'string' || savedItem.enabled !== false;
       item.label = document.querySelector(`#component-choice option[value="${type}"]`)?.textContent ?? type;
       return item;
     });
@@ -456,7 +506,9 @@ function imageToBrightnessData(image) {
 
 function createSystem(parameters) {
   const sourceItem = extraComponents.find(item => item.type === 'light-source');
-  const source = sourceItem?.component ?? makeLightSource('uniform', {});
+  const source = sourceItem?.enabled === false
+    ? new TransparentComponent()
+    : sourceItem?.component ?? makeLightSource('uniform', {});
   const fieldOptions = {
     width: parameters.simulationParameters.resolutionWidth,
     height: parameters.simulationParameters.resolutionHeight,
@@ -466,7 +518,10 @@ function createSystem(parameters) {
   };
   if (parameters.environment === 'hologram') {
     const graph = new OpticalGraph();
-    graph.addNode('hologram-field', makeLightSource('gaussian', { ...sourceSchemas.gaussian.defaults, ...sourceItem?.params }));
+    const hologramSource = sourceItem?.enabled === false
+      ? new TransparentComponent()
+      : makeLightSource('gaussian', { ...sourceSchemas.gaussian.defaults, ...sourceItem?.params });
+    graph.addNode('hologram-field', hologramSource);
     graph.addNode('incident-field', source);
     graph.addNode('hologram', new Hologram(), { inputs: 2 });
     graph.addNode('output', new Plane('Hologram output'));
@@ -491,7 +546,9 @@ function createSystem(parameters) {
       .connect('splitter-b', 0, 'output', 0);
     return { run: () => graph.run(fieldOptions).planes[0].snapshot() };
   }
-  const chain = extraComponents.map(item => item.component);
+  const chain = extraComponents.map(item =>
+    item.enabled === false ? new TransparentComponent() : item.component
+  );
   extraComponents.forEach((item, index) => {
     if (item.type === 'clone-of') {
       const targetIndex = Math.round(item.params.targetIndex);
@@ -581,6 +638,7 @@ function renderChainList() {
       displayNames[index];
 
     const row = document.createElement('li');
+    row.classList.toggle('is-disabled', item.enabled === false);
 
     const header = document.createElement('div');
     header.className =
@@ -594,6 +652,7 @@ function renderChainList() {
 
     const actions =
       document.createElement('span');
+    actions.className = 'component-row-actions';
 
     const moveUp =
       document.createElement('button');
@@ -676,11 +735,29 @@ function renderChainList() {
       () => {
         const copy = makeSelectedComponent(item.type, { ...item.params });
         copy.label = item.label;
+        copy.enabled = item.enabled !== false;
         extraComponents.splice(index + 1, 0, copy);
         renderChainList();
         render();
       }
     );
+
+    const visibility = document.createElement('button');
+    visibility.type = 'button';
+    visibility.className = 'visibility-toggle';
+    visibility.innerHTML = item.enabled === false
+      ? '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.2A11.2 11.2 0 0 1 12 5c6.4 0 10 7 10 7a14.8 14.8 0 0 1-3.1 3.8M6.2 6.2C3.5 8 2 12 2 12s3.6 7 10 7a10.8 10.8 0 0 0 3.2-.5"/></svg>'
+      : '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
+    visibility.title = item.enabled === false
+      ? `Return ${displayLabel} to the component chain`
+      : `Temporarily remove ${displayLabel} from the component chain`;
+    visibility.setAttribute('aria-label', visibility.title);
+    visibility.setAttribute('aria-pressed', String(item.enabled !== false));
+    visibility.addEventListener('click', () => {
+      item.enabled = item.enabled === false;
+      renderChainList();
+      render();
+    });
 
     const remove =
       document.createElement('button');
@@ -711,6 +788,7 @@ function renderChainList() {
       moveUp,
       moveDown,
       duplicate,
+      visibility,
       remove
     );
 
@@ -756,6 +834,19 @@ function renderChainList() {
           )
         )
         .forEach(field => {
+
+          if (field.input === 'number') {
+            settings.append(createNumericControl(
+              field,
+              item.params[field.key],
+              value => {
+                item.params[field.key] = value;
+                item.component = makeSelectedComponent(item.type, item.params).component;
+                render();
+              }
+            ));
+            return;
+          }
 
           const fieldLabel =
             document.createElement('label');
@@ -1106,15 +1197,11 @@ function buildInspectionPointOptions() {
       extraComponents
     );
 
-  const options = [
-    {
-      value: 'source',
-      label: 'After light source'
-    }
-  ];
+  const options = [];
 
   extraComponents.forEach(
     (item, index) => {
+      if (item.enabled === false) return;
 
       options.push({
         value: `after:${index}`,
@@ -1149,6 +1236,7 @@ function getBeamInspectionData(parameters) {
   let beam = new Beam(field.resolutionWidth, field.resolutionHeight, field.physicalWidth * 1e-3, field.physicalHeight * 1e-3, field.wavelength * 1e-9);
   const entries = [{ key: 'source', label: 'Initial dark field', beam: beam.clone() }];
   extraComponents.forEach((item, index) => {
+    if (item.enabled === false) return;
     const result = item.component.apply(beam);
     beam = Array.isArray(result) ? result[0] : result;
     entries.push({ key: `after:${index}`, label: `After ${item.label}`, beam: beam.clone() });
