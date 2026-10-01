@@ -30,7 +30,7 @@ import {
   PolygonalAperture,
   Plane,
   SingleSlitAperture,
-  SlitAperture,
+  // SlitAperture,
   SpiralPhasePlate,
   SpiralAdaptiveFresnelLensComponent,
   TransparentComponent,
@@ -110,15 +110,16 @@ let hologramBitmapData = null;
 let eitherOrMaskData = null;
 let phaseConjugateMaskData = null;
 const environmentPresets = {
-  'double-slit': { chain: [['light-source', { type: 'uniform' }], ['double-slit', {}], ['lens', { focalLength: 0.6 }]] },
-  'single-slit': { chain: [['light-source', { type: 'uniform' }], ['single-slit', {}]] },
-  grating: { chain: [['light-source', { type: 'uniform' }], ['grating', {}]] },
+  'double-slit': { chain: [['light-source', { type: 'uniform' }], ['aperture', { apertureType: 'double-slit' }], ['lens', { focalLength: 0.6 }]] },
+  'single-slit': { chain: [['light-source', { type: 'uniform' }], ['aperture', { apertureType: 'single-slit' }]] },
+  grating: { chain: [['light-source', { type: 'uniform' }], ['aperture', { apertureType: 'grating' }]] },
   'mach-zehnder': { chain: [['light-source', { type: 'uniform' }]] },
   hologram: { chain: [['light-source', { type: 'uniform' }]] }
 };
 const componentSchemas = {
   'light-source': { defaults: { type: 'uniform', phase: 0, xCentre: 0, yCentre: 0 }, fields: [] },
   transparent: { defaults: {}, fields: [] },
+  aperture: { defaults: { apertureType: 'double-slit' }, fields: [] },
   'clone-of': { defaults: { targetIndex: 0 }, fields: [
     { key: 'targetIndex', label: 'Component index', input: 'number', min: 0, max: 64, step: 1 }
   ] },
@@ -223,12 +224,12 @@ const componentSchemas = {
     { key: 'xCentre', label: 'X centre (mm)', input: 'number', min: -10, max: 10, step: 0.01 },
     { key: 'yCentre', label: 'Y centre (mm)', input: 'number', min: -10, max: 10, step: 0.01 }
   ] },
-  slit: { defaults: { width: 0.12, rotation: 0, xCentre: 0, yCentre: 0 }, fields: [
-    { key: 'width', label: 'Width (mm)', input: 'number', min: 0.01, max: 10, step: 0.01 },
-    { key: 'rotation', label: 'Rotation (deg)', input: 'number', min: -180, max: 180, step: 1 },
-    { key: 'xCentre', label: 'X centre (mm)', input: 'number', min: -10, max: 10, step: 0.01 },
-    { key: 'yCentre', label: 'Y centre (mm)', input: 'number', min: -10, max: 10, step: 0.01 }
-  ] },
+  // slit: { defaults: { width: 0.12, rotation: 0, xCentre: 0, yCentre: 0 }, fields: [
+  //   { key: 'width', label: 'Width (mm)', input: 'number', min: 0.01, max: 10, step: 0.01 },
+  //   { key: 'rotation', label: 'Rotation (deg)', input: 'number', min: -180, max: 180, step: 1 },
+  //   { key: 'xCentre', label: 'X centre (mm)', input: 'number', min: -10, max: 10, step: 0.01 },
+  //   { key: 'yCentre', label: 'Y centre (mm)', input: 'number', min: -10, max: 10, step: 0.01 }
+  // ] },
   polygonal: { defaults: { sides: 6, radius: 0.8, rotation: 0, xCentre: 0, yCentre: 0 }, fields: [
     { key: 'sides', label: 'Sides', input: 'number', min: 3, max: 32, step: 1 },
     { key: 'radius', label: 'Radius (mm)', input: 'number', min: 0.01, max: 10, step: 0.01 },
@@ -245,6 +246,17 @@ const componentSchemas = {
     { key: 'separation', label: 'Separation (mm)', input: 'number', min: 0, max: 100, step: 0.01 }
   ] }
 };
+const apertureTypeOptions = [
+  ['double-slit', 'Double-slit aperture'],
+  ['single-slit', 'Single-slit aperture'],
+  ['grating', 'Transmission grating'],
+  ['gaussian', 'Gaussian aperture'],
+  ['annular', 'Annular aperture'],
+  // ['slit', 'Slit aperture'],
+  ['polygonal', 'Polygonal aperture'],
+  ['absorbing', 'Absorbing boundary'],
+  ['aperture-stack', 'Aperture stack']
+];
 
 const distanceNumber =
   document.querySelector('#distance-number');
@@ -398,15 +410,23 @@ function applyState(state) {
 
   if (Array.isArray(state.chain)) {
     const restoredComponents = state.chain.map(savedItem => {
-      const type = typeof savedItem === 'string' ? savedItem : savedItem.type;
-      const item = makeSelectedComponent(type, typeof savedItem === 'string' ? {} : savedItem.params);
+      const savedType = typeof savedItem === 'string' ? savedItem : savedItem.type;
+      const savedParams = typeof savedItem === 'string' ? {} : savedItem.params;
+      const legacyAperture = apertureTypeOptions.some(([type]) => type === savedType);
+      const type = legacyAperture ? 'aperture' : savedType;
+      const params = legacyAperture
+        ? makeApertureParameters(savedType, savedParams)
+        : savedParams;
+      const item = makeSelectedComponent(type, params);
       item.enabled = typeof savedItem === 'string' || savedItem.enabled !== false;
-      item.label = document.querySelector(`#component-choice option[value="${type}"]`)?.textContent ?? type;
+      item.label = type === 'aperture'
+        ? getApertureLabel(item.params.apertureType)
+        : document.querySelector(`#component-choice option[value="${type}"]`)?.textContent ?? type;
       return item;
     });
     if (state.version === undefined) {
-      const item = makeSelectedComponent('double-slit');
-      item.label = 'Double-slit aperture';
+      const item = makeSelectedComponent('aperture', { apertureType: 'double-slit' });
+      item.label = getApertureLabel(item.params.apertureType);
       restoredComponents.unshift(item);
     }
     if (state.version !== 3 && !restoredComponents.some(item => item.type === 'light-source')) {
@@ -426,7 +446,9 @@ function applyEnvironmentPreset(environment) {
   const preset = environmentPresets[environment] ?? environmentPresets['double-slit'];
   extraComponents.splice(0, extraComponents.length, ...preset.chain.map(([type, params]) => {
     const item = makeSelectedComponent(type, params);
-    item.label = document.querySelector(`#component-choice option[value="${type}"]`)?.textContent ?? type;
+    item.label = type === 'aperture'
+      ? getApertureLabel(item.params.apertureType)
+      : document.querySelector(`#component-choice option[value="${type}"]`)?.textContent ?? type;
     return item;
   }));
   renderChainList();
@@ -487,6 +509,29 @@ function makeStackAperture(type) {
   if (type === 'double-slit') return new DoubleSlitAperture({ separation: 0.8e-3, width: 0.12e-3 });
   if (type === 'gaussian') return new GaussianAperture({ sigma: 0.8e-3 });
   return new GratingAperture({ period: 0.8e-3, width: 0.12e-3 });
+}
+
+function makeApertureParameters(apertureType, savedParams = {}) {
+  const selectedType = apertureTypeOptions.some(([type]) => type === apertureType)
+    ? apertureType
+    : 'double-slit';
+  if (selectedType === 'aperture-stack') {
+    return {
+      apertureType: selectedType,
+      stackApertureType: savedParams.stackApertureType ?? savedParams.apertureType ?? 'grating',
+      count: savedParams.count ?? 10,
+      separation: savedParams.separation ?? 1
+    };
+  }
+  return {
+    ...componentSchemas[selectedType].defaults,
+    ...savedParams,
+    apertureType: selectedType
+  };
+}
+
+function getApertureLabel(apertureType) {
+  return apertureTypeOptions.find(([type]) => type === apertureType)?.[1] ?? 'Aperture';
 }
 
 function imageToBrightnessData(image) {
@@ -561,9 +606,14 @@ function createSystem(parameters) {
 
 function makeSelectedComponent(type, savedParams = {}) {
   const schema = componentSchemas[type] ?? componentSchemas.transparent;
-  const params = { ...schema.defaults, ...savedParams };
+  const params = type === 'aperture'
+    ? makeApertureParameters(savedParams.apertureType ?? 'double-slit', savedParams)
+    : { ...schema.defaults, ...savedParams };
   let component = new TransparentComponent();
   if (type === 'light-source') component = makeLightSource(params.type, { ...sourceSchemas[params.type]?.defaults, ...params });
+  else if (type === 'aperture') component = params.apertureType === 'aperture-stack'
+    ? makeSelectedComponent('aperture-stack', { ...params, apertureType: params.stackApertureType }).component
+    : makeSelectedComponent(params.apertureType, params).component;
   else if (type === 'nd-filter') component = new NeutralDensityFilter(params);
   else if (type === 'spiral-phase') component = new SpiralPhasePlate(params.topologicalCharge);
   else if (type === 'beam-expander') component = new BeamExpander(params.magnification);
@@ -591,7 +641,7 @@ function makeSelectedComponent(type, savedParams = {}) {
   else if (type === 'grating') component = new GratingAperture({ period: params.period * 1e-3, width: params.width * 1e-3 });
   else if (type === 'gaussian') component = new GaussianAperture({ sigma: params.sigma * 1e-3, xCentre: params.xCentre * 1e-3, yCentre: params.yCentre * 1e-3 });
   else if (type === 'annular') component = new AnnularAperture({ outerRadius: params.outerRadius * 1e-3, innerRadius: params.innerRadius * 1e-3, xCentre: params.xCentre * 1e-3, yCentre: params.yCentre * 1e-3 });
-  else if (type === 'slit') component = new SlitAperture({ width: params.width * 1e-3, rotation: params.rotation * Math.PI / 180, xCentre: params.xCentre * 1e-3, yCentre: params.yCentre * 1e-3 });
+  // else if (type === 'slit') component = new SlitAperture({ width: params.width * 1e-3, rotation: params.rotation * Math.PI / 180, xCentre: params.xCentre * 1e-3, yCentre: params.yCentre * 1e-3 });
   else if (type === 'polygonal') component = new PolygonalAperture({ sides: params.sides, radius: params.radius * 1e-3, rotation: params.rotation * Math.PI / 180, xCentre: params.xCentre * 1e-3, yCentre: params.yCentre * 1e-3 });
   else if (type === 'absorbing') component = new AbsorbingBoundary(params.width);
   return { component, type, params };
@@ -601,25 +651,27 @@ function getComponentDisplayNames(components) {
   const counts = new Map();
 
   components.forEach(component => {
+    const key = `${component.type}:${component.label}`;
     counts.set(
-      component.type,
-      (counts.get(component.type) ?? 0) + 1
+      key,
+      (counts.get(key) ?? 0) + 1
     );
   });
 
   const indices = new Map();
 
   return components.map(component => {
-    const count = counts.get(component.type) ?? 0;
+    const key = `${component.type}:${component.label}`;
+    const count = counts.get(key) ?? 0;
 
     if (count <= 1) {
       return component.label;
     }
 
     const number =
-      (indices.get(component.type) ?? 0) + 1;
+      (indices.get(key) ?? 0) + 1;
 
-    indices.set(component.type, number);
+    indices.set(key, number);
 
     return `${component.label} ${number}`;
   });
@@ -804,7 +856,14 @@ function renderChainList() {
     const schema =
       componentSchemas[item.type]
       ?? componentSchemas.transparent;
-    const fields = item.type === 'light-source'
+    const fields = item.type === 'aperture'
+      ? [
+          { key: 'apertureType', label: 'Type', input: 'select', options: apertureTypeOptions },
+          ...(item.params.apertureType === 'aperture-stack'
+            ? componentSchemas['aperture-stack'].fields.map(field => field.key === 'apertureType' ? { ...field, key: 'stackApertureType' } : field)
+            : componentSchemas[item.params.apertureType]?.fields ?? [])
+        ]
+      : item.type === 'light-source'
       ? [
           { key: 'type', label: 'Profile', input: 'select', options: Object.entries(sourceSchemas).map(([value, sourceSchema]) => [value, sourceSchema.label]) },
           { key: 'phase', label: 'Phase (deg)', input: 'number', min: -360, max: 360, step: 1 },
@@ -924,6 +983,10 @@ function renderChainList() {
               if (item.type === 'light-source' && field.key === 'type') {
                 Object.assign(item.params, sourceSchemas[item.params.type].defaults);
               }
+              if (item.type === 'aperture' && field.key === 'apertureType') {
+                item.params = makeApertureParameters(item.params.apertureType);
+                item.label = getApertureLabel(item.params.apertureType);
+              }
 
               item.component =
                 makeSelectedComponent(
@@ -932,8 +995,8 @@ function renderChainList() {
                 ).component;
 
               if (
-                (item.type === 'hologrammifier' || item.type === 'light-source') &&
-                field.key === 'type'
+                ((item.type === 'hologrammifier' || item.type === 'light-source') && field.key === 'type') ||
+                (item.type === 'aperture' && field.key === 'apertureType')
               ) {
                 renderChainList();
               }
@@ -1386,14 +1449,14 @@ function render() {
     'single-slit': 'Single-slit diffraction',
     grating: 'Transmission grating orders'
   };
-  const aperture = extraComponents.find(item => ['double-slit', 'single-slit', 'grating'].includes(item.type));
+  const aperture = extraComponents.find(item => item.type === 'aperture' && item.enabled !== false);
   const inspectionTitle = selectedInspection?.label ?? 'Beam profile';
   document.querySelector('#plot-title').textContent = plotMode.value === 'fourier-intensity'
     ? `${inspectionTitle} / Fourier transform (intensity)`
     : parameters.environment === 'mach-zehnder' && inspectionKey === 'source'
       ? 'Mach-Zehnder output'
       : aperture && inspectionKey === 'source'
-        ? titles[aperture.type] ?? `${aperture.label} intensity`
+        ? titles[aperture.params.apertureType] ?? `${aperture.label} intensity`
         : inspectionTitle;
   document.querySelector('#peak-readout').textContent = `Peak ${maximum.toExponential(2)}`;
   document.querySelector('#plot-eyebrow').textContent = `02 / ${plotMode.selectedOptions[0].textContent}`;
@@ -1457,7 +1520,9 @@ Object.values(controls).forEach(control => control.addEventListener('input', ren
 document.querySelector('#add-component').addEventListener('click', () => {
   const choice = document.querySelector('#component-choice');
   const item = makeSelectedComponent(choice.value);
-  item.label = choice.selectedOptions[0].textContent;
+  item.label = item.type === 'aperture'
+    ? getApertureLabel(item.params.apertureType)
+    : choice.selectedOptions[0].textContent;
   extraComponents.push(item);
   renderChainList();
   render();
